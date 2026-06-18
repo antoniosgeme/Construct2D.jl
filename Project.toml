@@ -1,0 +1,17 @@
+name = "Construct2D"
+uuid = "9a81e957-f2a4-4d04-9e46-185280d2c20f"
+authors = ["Antonios Geme <antoniosgeme@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[compat]
+Printf = "1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

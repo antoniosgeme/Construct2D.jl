@@ -1,0 +1,11 @@
+Manifest.toml
+/docs/build/
+/docs/Manifest.toml
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+.DS_Store
+
+# Pre-existing Julia MCP server environment that happens to live in this dir;
+# not part of the package.
+julia-mcp/
