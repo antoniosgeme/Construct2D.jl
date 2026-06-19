@@ -25,12 +25,19 @@ sources = [
 # the *system-specific* ones (Makefile_Linux_MacOSX / Makefile_Windows) are STALE
 # — they still reference `src/xfoil_deps.f`, but v2.1.5 renamed that file to
 # `src/xfoil_deps.f90`, so those makefiles fail. The plain root `Makefile` is the
-# up-to-date one (uses `xfoil_deps.f90`, `-std=f2018`) and already honors `$(FC)`,
-# so we just point it at the cross-compiler. There is no `install` target, so we
-# copy the resulting executable ourselves. Build serially: the root Makefile
-# orders the `xfoil_deps` module before its consumers, which `-j` could violate.
+# up-to-date one (uses `xfoil_deps.f90`) and already honors `$(FC)`, so we just
+# point it at the cross-compiler. There is no `install` target, so we copy the
+# resulting executable ourselves. Build serially: the root Makefile orders the
+# `xfoil_deps` module before its consumers, which `-j` could violate.
+#
+# Second gotcha: the root Makefile hardcodes `FCFLAGS=... -std=f2023`, but
+# BinaryBuilder's gfortran is GCC 8.1, which predates that flag (`-std=f2023`
+# arrived in GCC 13). The sources are really Fortran 2018, so downgrade the
+# standard rather than forcing a newer, less-portable compiler
+# (`preferred_gcc_version`), which would raise the JLL's glibc baseline.
 script = raw"""
 cd ${WORKSPACE}/srcdir/Construct2D
+sed -i 's/-std=f2023/-std=f2018/' Makefile
 make FC=${FC}
 
 # Some toolchains (e.g. mingw) append .exe to the linker output automatically.
