@@ -9,6 +9,10 @@ name: JLL preflight
 # PR; Yggdrasil's CI then builds every platform and registers the JLL in General.
 
 on:
+  # The "Run workflow" button (workflow_dispatch) only appears in the Actions UI
+  # after this workflow has run at least once on the default branch. The first
+  # run must therefore be triggered by a push that changes one of the `paths`
+  # below; subsequent runs can be started manually.
   workflow_dispatch:
   push:
     branches: [main, master]
