@@ -61,15 +61,36 @@ jobs:
         run: julia .ci/build_tarballs.jl --verbose x86_64-linux-gnu-libgfortran5
 
       - name: Extract product
+        id: extract
         run: |
+          set -euo pipefail
           mkdir -p extracted
-          tar xzf products/Construct2D*.tar.gz -C extracted
-          find extracted -maxdepth 3 -type f
-          test -x extracted/bin/construct2d
+          # Exactly one product tarball is expected. Select it explicitly rather
+          # than relying on a name glob — BinaryBuilder encodes version, platform
+          # and libgfortran ABI into the filename.
+          shopt -s nullglob
+          tarballs=(products/*.tar.gz)
+          if [ ${#tarballs[@]} -eq 0 ]; then
+            echo "No product tarball under products/"; ls -R products || true; exit 1
+          fi
+          echo "Extracting ${tarballs[0]}"
+          tar xzf "${tarballs[0]}" -C extracted
+          echo "--- tarball contents ---"
+          find extracted -type f | sort
+          # Find the binary wherever it landed and export an ABSOLUTE path: the
+          # wrapper runs construct2d from a temp working dir, so a relative path
+          # would not resolve.
+          mapfile -t exes < <(find "$PWD/extracted" -type f -name 'construct2d*')
+          if [ ${#exes[@]} -eq 0 ]; then
+            echo "construct2d binary not found in tarball"; exit 1
+          fi
+          chmod +x "${exes[0]}"
+          echo "construct2d binary: ${exes[0]}"
+          echo "exe=${exes[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Run wrapper tests against the built binary
         env:
-          CONSTRUCT2D_EXE: ${{ github.workspace }}/extracted/bin/construct2d
+          CONSTRUCT2D_EXE: ${{ steps.extract.outputs.exe }}
         run: |
           julia --project=. -e 'using Pkg; Pkg.instantiate(); include("test/runtests.jl")'
 
