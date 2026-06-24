@@ -9,3 +9,6 @@ Manifest.toml
 # Pre-existing Julia MCP server environment that happens to live in this dir;
 # not part of the package.
 julia-mcp/
+
+# Generated example output (the SVG used in the README is committed deliberately).
+examples/*.p3d

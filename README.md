@@ -1,132 +1,98 @@
 # Construct2D.jl
 
-A cross-platform Julia interface to [**Construct2D**](https://github.com/furstj/Construct2D),
-a structured grid generator for 2D airfoils (GPL-3.0, originally by Daniel
-Prosser; the actively maintained fork is by Jiří Fürst).
+A **pure-Julia** structured grid generator for 2D airfoils — a port of Daniel
+Prosser's [**Construct2D**](https://sourceforge.net/projects/construct2d/)
+(GPL-3.0).
 
-The goal: `]add Construct2D` and mesh an airfoil from Julia — no Fortran
-compiler, no manual setup — on Linux, macOS, and Windows. The native binary is
-delivered as a precompiled artifact via `Construct2D_jll` (see
-[Distribution](#distribution)); this package is the idiomatic Julia layer on top.
+No Fortran toolchain, no external binary, no process I/O: `]add Construct2D` and
+mesh an airfoil entirely in Julia, on any platform Julia runs on.
 
 ```julia
 using Construct2D
 
-# From a coordinate file (XFoil/Selig labeled format) ...
-result = mesh_airfoil("naca0012.dat")
+# From a coordinate file (XFOIL/Selig labeled format) ...
+res = mesh_airfoil("naca0012.dat")
 
 # ... or from coordinates already in Julia, with custom options:
-opts = GridOptions(jmax = 120, radi = 20.0, ypls = 0.8, recd = 3.0e6, slvr = "HYPR")
-result = mesh_airfoil((x, y); name = "myfoil", options = opts)
+opts = GridOptions(jmax = 120, radi = 20.0, ypls = 0.8, recd = 3.0e6)
+res  = mesh_airfoil((x, y); name = "myfoil", options = opts)
 
-result.grid.X      # imax×jmax matrix of node x-coordinates
-result.grid.Y      # imax×jmax matrix of node y-coordinates
-result.p3d         # path to the Plot3D grid file
-result.nmf         # path to the boundary-condition (.nmf) file
-result.wall_distance   # first-layer wall spacing parsed from the run log
+res.X              # imax×jmax matrix of node x-coordinates
+res.Y              # imax×jmax matrix of node y-coordinates
+res.wall_distance  # first-layer wall spacing implied by the y+ target
+write_plot3d("myfoil.p3d", res.grid)   # export a Plot3D grid file
 ```
 
 ## How it works
 
-Construct2D is a menu-driven Fortran executable, not a library. `Construct2D.jl`
-drives it robustly and headlessly via process I/O:
+[`mesh_airfoil`](src/Construct2D.jl) reads the airfoil, picks a topology from the
+trailing-edge geometry, grows a structured grid outward from the surface with the
+**hyperbolic** solver, and returns the node coordinates as Julia matrices.
 
-1. writes your airfoil to a `.dat` file and your [`GridOptions`](#options) to a
-   `grid_options.in` namelist in a temporary working directory;
-2. runs `construct2d <airfoil>.dat`, feeding the menu commands
-   (`GRID` → `SMTH`/`BUFF` → `QUIT`) on stdin;
-3. reads the resulting `<name>.p3d` Plot3D grid back into Julia arrays.
+- **Sharp (closed) trailing edge ⇒ C-grid.** `imax = nsrf + 2·nwke` (a wake cut is
+  added on both sides).
+- **Blunt (open) trailing edge ⇒ O-grid.** The TE is filleted with a B-spline
+  (`nte + 1` added points); `imax = nsrf`.
 
-`mesh_airfoil` is the high-level entry point. `run_construct2d(workdir, datfile;
-commands=[...])` is a thin escape hatch if you want to drive the menu yourself.
+`res.X[:, 1]` / `res.Y[:, 1]` is the airfoil surface row; `res.X[:, end]` is the
+farfield boundary. The first off-wall spacing is set from a target y+ and chord
+Reynolds number.
+
+<p align="center"><img src="examples/naca0012_grid.svg" width="520"
+  alt="O-grid around a NACA0012"></p>
 
 ## Options
 
-[`GridOptions`](src/options.jl) mirrors the `&SOPT` / `&VOPT` / `&OOPT` namelist
-groups Construct2D reads. Every field defaults to `nothing` and is **omitted**
-from `grid_options.in` when unset, so Construct2D applies its own (geometry-aware)
-defaults. Common knobs:
+[`GridOptions`](src/options.jl) — every field defaults to `nothing`, meaning "use
+Construct2D's geometry-aware default". Common knobs:
 
-| field  | meaning                                             |
-|--------|-----------------------------------------------------|
-| `nsrf` | points distributed over the airfoil surface         |
-| `jmax` | points in the wall-normal direction                 |
-| `radi` | farfield radius (chords)                            |
-| `topo` | `"OGRD"` or `"CGRD"` (omit to use the recommended)  |
-| `slvr` | `"HYPR"` (hyperbolic) or `"ELLP"` (elliptic)        |
-| `ypls` | target y+ (with `recd`, the Reynolds number)        |
-| `gdim` | `2` or `3`; `f3dm=true` enables FUN3D output mode   |
+| field  | meaning                                                       |
+|--------|---------------------------------------------------------------|
+| `jmax` | points in the wall-normal direction (default 100)             |
+| `radi` | farfield radius in chords (default 15)                        |
+| `topo` | `"OGRD"` / `"CGRD"`; omit to use the recommended topology     |
+| `slvr` | `"HYPR"` (hyperbolic, default). `"ELLP"` not yet ported       |
+| `ypls` | target y+ for the first cell (with `recd`, the Reynolds no.)  |
+| `recd` | chord Reynolds number used with `ypls` (default 1e6)          |
+| `nwke` | wake points for the C-grid (default 50)                       |
+| `nte`  | points inserted to fillet a blunt TE (default 13)             |
+| `alfa`, `epsi`, `epse`, `funi`, `asmt` | hyperbolic solver controls    |
 
-See the docstring (`?GridOptions`) for the full list.
+See `?GridOptions` for the full list.
 
-## Locating the executable
+## Examples
 
-The binary is resolved in this order:
+Runnable scripts in [`examples/`](examples):
 
-1. an explicit path from `set_construct2d_path!("/path/to/construct2d")`;
-2. the `CONSTRUCT2D_EXE` environment variable;
-3. `Construct2D_jll`, once that artifact is installed (see below).
-
-## Distribution
-
-The native binary is built once for every platform with
-[BinaryBuilder.jl](https://docs.binarybuilder.org) and published as
-`Construct2D_jll` through [Yggdrasil](https://github.com/JuliaPackaging/Yggdrasil).
-The build recipe lives at [`.ci/build_tarballs.jl`](.ci/build_tarballs.jl).
-
-### Pre-flight CI
-
-The [`JLL preflight`](.github/workflows/jll-preflight.yml) GitHub Action builds the
-recipe on Linux and runs the end-to-end test against the freshly built binary (the
-test that is skipped when no binary is present). Use it to validate the recipe and
-the wrapper before publishing. It does **not** publish the JLL.
-
-### Publishing via Yggdrasil
-
-Copy `.ci/build_tarballs.jl` to `C/Construct2D/build_tarballs.jl` in a fork of
-Yggdrasil and open a PR. Yggdrasil's CI builds every platform and registers
-`Construct2D_jll` in General.
-
-### Building / testing the JLL locally (BinaryBuilder needs Linux)
-
-On Windows, use WSL2 (or any Linux box). With a recent Julia + `]add BinaryBuilder`:
+- `01_basic_naca0012.jl` — mesh a file, inspect the result, write Plot3D.
+- `02_options_and_coords.jl` — custom options, in-memory (sharp-TE) coordinates.
+- `03_visualize_svg.jl` — render the mesh to a standalone SVG.
 
 ```bash
-julia --color=yes build_tarballs.jl --verbose --debug x86_64-linux-gnu
+julia --project=. examples/01_basic_naca0012.jl
 ```
-
-This produces a tarball under `products/` and a local `Construct2D_jll`. Point
-this package at the freshly built binary to run the end-to-end tests before the
-JLL is registered:
-
-```julia
-using Construct2D
-Construct2D.set_construct2d_path!("/path/to/products/.../bin/construct2d")
-```
-
-### Wiring the JLL (once registered)
-
-After the Yggdrasil PR merges and `Construct2D_jll` is in General, make it the
-default provider by adding it as a dependency and registering its `construct2d`
-function in `Construct2D`'s `__init__` (one branch in `construct2d_exe`):
-
-```julia
-# Project.toml: add Construct2D_jll to [deps] (UUID from the generated JLL)
-using Construct2D_jll
-function __init__()
-    Construct2D._JLL_PROVIDER[] = Construct2D_jll.construct2d
-end
-```
-
-(Or move this into a package extension so the JLL stays an optional dependency.)
 
 ## Status
 
-`v0.1` — staged build. The wrapper API and the BinaryBuilder recipe are complete;
-the JLL has not yet been submitted to Yggdrasil. Until then, supply a binary via
-`set_construct2d_path!` / `CONSTRUCT2D_EXE`.
+`v0.2` — pure-Julia rewrite. **Working:** the hyperbolic solver (`HYPR`, the
+default) on both O- and C-grids, blunt-TE filleting, y+ wall spacing, Plot3D I/O.
+
+**Not yet ported** (these fail loudly rather than produce a wrong grid):
+
+- `surface = :smoothed` — XFOIL surface repaneling (`SMTH`). Use the default
+  `:buffer` mode, which meshes the loaded geometry directly.
+- `slvr = "ELLP"` — the elliptic solver.
+- the `.nmf` boundary-condition writer and grid-quality statistics.
+
+This is a faithful translation: each routine cites its upstream Fortran source
+(`# <- src/<file>.f90 :: <routine>`), array indexing matches one-to-one (both
+languages are 1-based and column-major), and the package mirrors the upstream
+`src/` module layout.
 
 ## License
 
-`Construct2D.jl` (this wrapper) is MIT-licensed. **Construct2D itself is GPL-3.0**;
-this package merely invokes it as a separate executable.
+**GPL-3.0.** Construct2D.jl is a derivative work — a Julia port of Daniel
+Prosser's GPL-3.0 [Construct2D](https://sourceforge.net/projects/construct2d/) —
+so it carries the same license. All credit for the original program and its
+grid-generation algorithms goes to Daniel Prosser. See [`LICENSE`](LICENSE) and
+[`COPYING`](COPYING).
